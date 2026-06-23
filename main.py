@@ -1,11 +1,9 @@
-git init
-git add .
-git commit -m "primeiro commit - API Frosty ocorrencias"
-
-
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+from supabase import create_client
+from pydantic import BaseModel
+from typing import List, Optional
 import pyodbc
 import os
 
@@ -18,6 +16,11 @@ app.add_middleware(
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
+)
+
+supabase = create_client(
+    os.getenv("SUPABASE_URL"),
+    os.getenv("SUPABASE_KEY")
 )
 
 def get_sql_connection():
@@ -139,5 +142,62 @@ def buscar_produtos(nro_pedido: str):
             "qtd_unidades": row[6]
         } for row in rows]
         return {"produtos": produtos}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+class ItemOcorrencia(BaseModel):
+    cod_produto: str
+    produto: str
+    unidade: Optional[str] = None
+    qtd_pedida_cx: Optional[int] = None
+    un_por_caixa: Optional[int] = None
+    qtd_pedida_un: Optional[int] = None
+    qtd_ocorrencia: int
+
+class OcorrenciaRequest(BaseModel):
+    filial: str
+    id_filial: int
+    nome_motorista: str
+    roteiro: str
+    nome_roteiro: str
+    cod_cliente: str
+    nome_cliente: str
+    nro_pedido: int
+    tipo: str
+    observacao: Optional[str] = None
+    itens: List[ItemOcorrencia]
+
+@app.post("/ocorrencia")
+def registrar_ocorrencia(ocorrencia: OcorrenciaRequest):
+    try:
+        resultado = supabase.table("ocorrencias").insert({
+            "filial": ocorrencia.filial,
+            "id_filial": ocorrencia.id_filial,
+            "nome_motorista": ocorrencia.nome_motorista,
+            "roteiro": ocorrencia.roteiro,
+            "nome_roteiro": ocorrencia.nome_roteiro,
+            "cod_cliente": ocorrencia.cod_cliente,
+            "nome_cliente": ocorrencia.nome_cliente,
+            "nro_pedido": ocorrencia.nro_pedido,
+            "tipo": ocorrencia.tipo,
+            "observacao": ocorrencia.observacao,
+        }).execute()
+
+        ocorrencia_id = resultado.data[0]["id"]
+
+        itens = [{
+            "ocorrencia_id": ocorrencia_id,
+            "cod_produto": item.cod_produto,
+            "produto": item.produto,
+            "unidade": item.unidade,
+            "qtd_pedida_cx": item.qtd_pedida_cx,
+            "un_por_caixa": item.un_por_caixa,
+            "qtd_pedida_un": item.qtd_pedida_un,
+            "qtd_ocorrencia": item.qtd_ocorrencia,
+        } for item in ocorrencia.itens]
+
+        supabase.table("itens_ocorrencia").insert(itens).execute()
+
+        return {"status": "sucesso", "ocorrencia_id": ocorrencia_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
